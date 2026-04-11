@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: shortlink-mysql
+    restart: always # 崩溃后自动重启，保证高可用
+    environment:
+      MYSQL_ROOT_PASSWORD: 123456 # 对应你 Go 代码里的密码
+      MYSQL_DATABASE: shortlink   # 也可以通过这里直接建库
+      TZ: Asia/Shanghai           # 设置时区，避免时间戳错乱
+    ports:
+      - "3306:3306" # 映射到宿主机，方便我们本地调试 Go 代码
+    volumes:
+      - mysql_data:/var/lib/mysql # 数据持久化：即使容器删了，数据还在！
+      - ./scripts/init.sql:/docker-entrypoint-initdb.d/init.sql # 挂载初始化脚本
+    command: 
+      --character-set-server=utf8mb4 
+      --collation-server=utf8mb4_unicode_ci 
+      --max_connections=1000 # 配合你 Go 代码里的高并发测试调大连接数限制
+
+  redis:
+    image: redis:7.0-alpine # 使用 alpine 版本，镜像体积极小，启动极快
+    container_name: shortlink-redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes # 开启 AOF 持久化，防止断电导致缓存全丢（面试高频考点）
+
+# 定义命名数据卷，交由 Docker 引擎管理
+volumes:
+  mysql_data:
+  redis_data:
