@@ -6,14 +6,14 @@ services:
     container_name: shortlink-mysql
     restart: always # 崩溃后自动重启，保证高可用
     environment:
-      MYSQL_ROOT_PASSWORD: 123456 # 对应你 Go 代码里的密码
+      MYSQL_ROOT_PASSWORD: 123456 # 对应 Go 代码里的密码
       MYSQL_DATABASE: shortlink   # 也可以通过这里直接建库
       TZ: Asia/Shanghai           # 设置时区，避免时间戳错乱
     ports:
-      - "3306:3306" # 映射到宿主机，方便我们本地调试 Go 代码
+      - "3306:3306" # 映射到宿主机，方便本地调试 Go 代码
     volumes:
       - mysql_data:/var/lib/mysql # 数据持久化：即使容器删了，数据还在！
-      - ./scripts/init.sql:/docker-entrypoint-initdb.d/init.sql # 挂载初始化脚本
+      - ../scripts/init.sql:/docker-entrypoint-initdb.d/init.sql # 挂载初始化脚本
     command: 
       --character-set-server=utf8mb4 
       --collation-server=utf8mb4_unicode_ci 
