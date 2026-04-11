@@ -1,0 +1,9 @@
+# 路径: deployments/prometheus/prometheus.yml
+global:
+  scrape_interval: 5s # 每 5 秒抓取一次数据，压测时看图表更爽
+
+scrape_configs:
+  - job_name: 'shortlink-backend'
+    static_configs:
+      # host.docker.internal 是 Docker 提供的魔法域名，指代宿主机（你的 WSL2）
+      - targets: ['host.docker.internal:8080']

@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"time"
 
+	"shortlink-system/internal/metrics"
 	"shortlink-system/internal/model"
 	"shortlink-system/internal/repository"
 	"shortlink-system/pkg/base62"
@@ -98,6 +99,8 @@ func (s *ShortLinkService) Redirect(ctx context.Context, shortCode string) (stri
 		// 高可用降级策略：如果 Redis 管道查询失败，宁可放行到下一步查数据库，也不能直接阻断正常用户的访问
 		fmt.Printf("布隆过滤器查询异常，触发降级放行: %v\n", err)
 	} else if !mightExist {
+		// 增加布隆过滤器拦截统计
+		metrics.BloomFilterInterceptionTotal.Inc()
 		return "", errors.New("请求非法：该短链绝对不存在")
 	}
 
@@ -106,9 +109,14 @@ func (s *ShortLinkService) Redirect(ctx context.Context, shortCode string) (stri
 	// 2. 第二道防线：查 Redis 缓存 (承担 99% 的读流量)
 	longURL, err := s.repo.Redis.Get(ctx, cacheKey).Result()
 	if err == nil {
+		// 增加缓存命中统计
+		metrics.CacheHitTotal.WithLabelValues("true").Inc()
 		return longURL, nil // Cache Hit，直接起飞
-	} else if err != redis.Nil {
-		fmt.Printf("Redis 查询异常: %v\n", err)
+	} else {
+		metrics.CacheHitTotal.WithLabelValues("false").Inc()
+		if err != redis.Nil {
+			fmt.Printf("Redis 查询异常: %v\n", err)
+		}
 	}
 
 	// 3. 第三道防线：Cache Miss，去 MySQL 回源

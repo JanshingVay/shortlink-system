@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"shortlink-system/internal/metrics"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -80,6 +81,8 @@ func RateLimitMiddleware(rdb *redis.Client, capacity, rate int) gin.HandlerFunc 
 
 		// Lua 脚本返回 0 表示触发限流
 		if result.(int64) == 0 {
+			// 增加限流拦截指标统计
+			metrics.RateLimitInterceptionTotal.WithLabelValues(c.FullPath()).Inc()
 			// 中断请求，返回 HTTP 429 Too Many Requests
 			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
 				"code":  429,

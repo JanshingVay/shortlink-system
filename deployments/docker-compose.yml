@@ -10,7 +10,7 @@ services:
       MYSQL_DATABASE: shortlink   # 也可以通过这里直接建库
       TZ: Asia/Shanghai           # 设置时区，避免时间戳错乱
     ports:
-      - "3306:3306" # 映射到宿主机，方便本地调试 Go 代码
+      - "3307:3306" # 映射到宿主机，方便本地调试 Go 代码
     volumes:
       - mysql_data:/var/lib/mysql # 数据持久化：即使容器删了，数据还在！
       - ../scripts/init.sql:/docker-entrypoint-initdb.d/init.sql # 挂载初始化脚本
@@ -24,10 +24,33 @@ services:
     container_name: shortlink-redis
     restart: always
     ports:
-      - "6379:6379"
+      - "6380:6379"
     volumes:
       - redis_data:/data
     command: redis-server --appendonly yes # 开启 AOF 持久化，防止断电导致缓存全丢（面试高频考点）
+
+  # 路径: deployments/docker-compose.yml (追加到最后)
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: shortlink-prometheus
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    # 让容器能通过 host.docker.internal 访问宿主机的 Go 服务
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: shortlink-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin # 默认密码设为 admin
+    depends_on:
+      - prometheus
 
 # 定义命名数据卷，交由 Docker 引擎管理
 volumes:
