@@ -5,17 +5,25 @@ import (
 	"shortlink-system/internal/api"
 	"shortlink-system/internal/repository"
 	"shortlink-system/internal/service"
+	"shortlink-system/pkg/config"
 
 	"github.com/gin-gonic/gin"
 )
 
 func main() {
-	cfg := repository.Config{
-		MySQLDSN:  "root:123456@tcp(127.0.0.1:3306)/shortlink?charset=utf8mb4&parseTime=True&loc=Local",
-		RedisAddr: "127.0.0.1:6379",
-		RedisPass: "",
+	// 1. 加载配置
+	cfg, err := config.LoadConfig("config.yaml")
+	if err != nil {
+		log.Fatalf("加载配置失败: %v", err)
 	}
-	repo, err := repository.NewStorage(cfg)
+
+	// 2. 初始化存储层
+	storageCfg := repository.Config{
+		MySQLDSN:  cfg.Database.MySQL.DSN,
+		RedisAddr: cfg.Database.Redis.Addr,
+		RedisPass: cfg.Database.Redis.Pass,
+	}
+	repo, err := repository.NewStorage(storageCfg)
 	if err != nil {
 		log.Fatalf("初始化存储层失败: %v", err)
 	}
@@ -33,7 +41,7 @@ func main() {
 	// 面试小技巧：生产环境建议用 gin.New() 并自行挂载 Recovery 和 Logger 中间件
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
-    router.Use(gin.Recovery())
+	router.Use(gin.Recovery())
 	err = router.SetTrustedProxies(nil)
 
 	// 4. 注册路由

@@ -1,0 +1,15 @@
+server:
+  port: 8080
+  mode: "debug" # 生产环境改为 "release"
+
+database:
+  mysql:
+    dsn: "root:123456@tcp(127.0.0.1:3306)/shortlink?charset=utf8mb4&parseTime=True&loc=Local"
+  redis:
+    addr: "127.0.0.1:6379"
+    pass: ""
+    db: 0
+
+app:
+  node_id: 1
+  url_prefix: "http://localhost:8080/"
