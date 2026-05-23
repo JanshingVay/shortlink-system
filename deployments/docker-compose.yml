@@ -1,35 +1,315 @@
 version: '3.8'
 
-services:
-  mysql:
-    image: mysql:8.0
-    container_name: shortlink-mysql
-    restart: always # 崩溃后自动重启，保证高可用
-    environment:
-      MYSQL_ROOT_PASSWORD: 123456 # 对应 Go 代码里的密码
-      MYSQL_DATABASE: shortlink   # 也可以通过这里直接建库
-      TZ: Asia/Shanghai           # 设置时区，避免时间戳错乱
-    ports:
-      - "3306:3306" # 映射到宿主机，方便本地调试 Go 代码
-    volumes:
-      - mysql_data:/var/lib/mysql # 数据持久化：即使容器删了，数据还在！
-      - ../scripts/init.sql:/docker-entrypoint-initdb.d/init.sql # 挂载初始化脚本
-    command: 
-      --character-set-server=utf8mb4 
-      --collation-server=utf8mb4_unicode_ci 
-      --max_connections=1000 # 配合你 Go 代码里的高并发测试调大连接数限制
+networks:
+  shortlink-network:
+    driver: bridge
 
-  redis:
-    image: redis:7.0-alpine # 使用 alpine 版本，镜像体积极小，启动极快
-    container_name: shortlink-redis
+services:
+  mysql-master:
+    image: mysql:8.0
+    container_name: shortlink-mysql-master
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-secure_root_password_123!}
+      MYSQL_DATABASE: shortlink
+      MYSQL_USER: shortlink
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-shortlink_secure_password_456!}
+      TZ: Asia/Shanghai
+    volumes:
+      - mysql_master_data:/var/lib/mysql
+      - ../scripts/init.sql:/docker-entrypoint-initdb.d/init.sql
+    command:
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --max_connections=1000
+      --server-id=1
+      --log-bin=mysql-bin
+      --binlog-format=ROW
+    networks:
+      - shortlink-network
+
+  mysql-slave1:
+    image: mysql:8.0
+    container_name: shortlink-mysql-slave1
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-secure_root_password_123!}
+      MYSQL_USER: shortlink
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-shortlink_secure_password_456!}
+      TZ: Asia/Shanghai
+    volumes:
+      - mysql_slave1_data:/var/lib/mysql
+    command:
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --max_connections=1000
+      --server-id=2
+      --read-only=1
+    depends_on:
+      - mysql-master
+    networks:
+      - shortlink-network
+
+  mysql-slave2:
+    image: mysql:8.0
+    container_name: shortlink-mysql-slave2
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-secure_root_password_123!}
+      MYSQL_USER: shortlink
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-shortlink_secure_password_456!}
+      TZ: Asia/Shanghai
+    volumes:
+      - mysql_slave2_data:/var/lib/mysql
+    command:
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --max_connections=1000
+      --server-id=3
+      --read-only=1
+    depends_on:
+      - mysql-master
+    networks:
+      - shortlink-network
+
+  redis-node-1:
+    image: redis:7.0-alpine
+    container_name: shortlink-redis-node-1
+    restart: always
+    volumes:
+      - redis_node_1_data:/data
+    command:
+      - redis-server
+      - --cluster-enabled
+      - "yes"
+      - --cluster-config-file
+      - nodes-7001.conf
+      - --cluster-node-timeout
+      - "5000"
+      - --appendonly
+      - "yes"
+      - --port
+      - "7001"
+      - --requirepass
+      - ${REDIS_PASSWORD:-redis_secure_password_789!}
+    networks:
+      - shortlink-network
+
+  redis-node-2:
+    image: redis:7.0-alpine
+    container_name: shortlink-redis-node-2
+    restart: always
+    volumes:
+      - redis_node_2_data:/data
+    command:
+      - redis-server
+      - --cluster-enabled
+      - "yes"
+      - --cluster-config-file
+      - nodes-7002.conf
+      - --cluster-node-timeout
+      - "5000"
+      - --appendonly
+      - "yes"
+      - --port
+      - "7002"
+      - --requirepass
+      - ${REDIS_PASSWORD:-redis_secure_password_789!}
+    networks:
+      - shortlink-network
+
+  redis-node-3:
+    image: redis:7.0-alpine
+    container_name: shortlink-redis-node-3
+    restart: always
+    volumes:
+      - redis_node_3_data:/data
+    command:
+      - redis-server
+      - --cluster-enabled
+      - "yes"
+      - --cluster-config-file
+      - nodes-7003.conf
+      - --cluster-node-timeout
+      - "5000"
+      - --appendonly
+      - "yes"
+      - --port
+      - "7003"
+      - --requirepass
+      - ${REDIS_PASSWORD:-redis_secure_password_789!}
+    networks:
+      - shortlink-network
+
+  redis-node-4:
+    image: redis:7.0-alpine
+    container_name: shortlink-redis-node-4
+    restart: always
+    volumes:
+      - redis_node_4_data:/data
+    command:
+      - redis-server
+      - --cluster-enabled
+      - "yes"
+      - --cluster-config-file
+      - nodes-7004.conf
+      - --cluster-node-timeout
+      - "5000"
+      - --appendonly
+      - "yes"
+      - --port
+      - "7004"
+      - --requirepass
+      - ${REDIS_PASSWORD:-redis_secure_password_789!}
+    networks:
+      - shortlink-network
+
+  redis-node-5:
+    image: redis:7.0-alpine
+    container_name: shortlink-redis-node-5
+    restart: always
+    volumes:
+      - redis_node_5_data:/data
+    command:
+      - redis-server
+      - --cluster-enabled
+      - "yes"
+      - --cluster-config-file
+      - nodes-7005.conf
+      - --cluster-node-timeout
+      - "5000"
+      - --appendonly
+      - "yes"
+      - --port
+      - "7005"
+      - --requirepass
+      - ${REDIS_PASSWORD:-redis_secure_password_789!}
+    networks:
+      - shortlink-network
+
+  redis-node-6:
+    image: redis:7.0-alpine
+    container_name: shortlink-redis-node-6
+    restart: always
+    volumes:
+      - redis_node_6_data:/data
+    command:
+      - redis-server
+      - --cluster-enabled
+      - "yes"
+      - --cluster-config-file
+      - nodes-7006.conf
+      - --cluster-node-timeout
+      - "5000"
+      - --appendonly
+      - "yes"
+      - --port
+      - "7006"
+      - --requirepass
+      - ${REDIS_PASSWORD:-redis_secure_password_789!}
+    networks:
+      - shortlink-network
+
+  shortlink-app-1:
+    build:
+      context: ..
+      dockerfile: deployments/Dockerfile
+    container_name: shortlink-app-1
+    restart: always
+    depends_on:
+      - mysql-master
+      - mysql-slave1
+      - mysql-slave2
+      - redis-node-1
+      - redis-node-2
+      - redis-node-3
+      - redis-node-4
+      - redis-node-5
+      - redis-node-6
+    environment:
+      - MYSQL_MASTER_DSN=shortlink:${MYSQL_PASSWORD:-shortlink_secure_password_456!}@tcp(mysql-master:3306)/shortlink?charset=utf8mb4&parseTime=True&loc=Local
+      - MYSQL_SLAVE1_DSN=shortlink:${MYSQL_PASSWORD:-shortlink_secure_password_456!}@tcp(mysql-slave1:3306)/shortlink?charset=utf8mb4&parseTime=True&loc=Local
+      - MYSQL_SLAVE2_DSN=shortlink:${MYSQL_PASSWORD:-shortlink_secure_password_456!}@tcp(mysql-slave2:3306)/shortlink?charset=utf8mb4&parseTime=True&loc=Local
+      - REDIS_CLUSTER_ADDRS=redis-node-1:7001,redis-node-2:7002,redis-node-3:7003,redis-node-4:7004,redis-node-5:7005,redis-node-6:7006
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-redis_secure_password_789!}
+      - GIN_MODE=release
+    networks:
+      - shortlink-network
+
+  shortlink-app-2:
+    build:
+      context: ..
+      dockerfile: deployments/Dockerfile
+    container_name: shortlink-app-2
+    restart: always
+    depends_on:
+      - mysql-master
+      - mysql-slave1
+      - mysql-slave2
+      - redis-node-1
+      - redis-node-2
+      - redis-node-3
+      - redis-node-4
+      - redis-node-5
+      - redis-node-6
+    environment:
+      - MYSQL_MASTER_DSN=shortlink:${MYSQL_PASSWORD:-shortlink_secure_password_456!}@tcp(mysql-master:3306)/shortlink?charset=utf8mb4&parseTime=True&loc=Local
+      - MYSQL_SLAVE1_DSN=shortlink:${MYSQL_PASSWORD:-shortlink_secure_password_456!}@tcp(mysql-slave1:3306)/shortlink?charset=utf8mb4&parseTime=True&loc=Local
+      - MYSQL_SLAVE2_DSN=shortlink:${MYSQL_PASSWORD:-shortlink_secure_password_456!}@tcp(mysql-slave2:3306)/shortlink?charset=utf8mb4&parseTime=True&loc=Local
+      - REDIS_CLUSTER_ADDRS=redis-node-1:7001,redis-node-2:7002,redis-node-3:7003,redis-node-4:7004,redis-node-5:7005,redis-node-6:7006
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-redis_secure_password_789!}
+      - GIN_MODE=release
+    networks:
+      - shortlink-network
+
+  shortlink-app-3:
+    build:
+      context: ..
+      dockerfile: deployments/Dockerfile
+    container_name: shortlink-app-3
+    restart: always
+    depends_on:
+      - mysql-master
+      - mysql-slave1
+      - mysql-slave2
+      - redis-node-1
+      - redis-node-2
+      - redis-node-3
+      - redis-node-4
+      - redis-node-5
+      - redis-node-6
+    environment:
+      - MYSQL_MASTER_DSN=shortlink:${MYSQL_PASSWORD:-shortlink_secure_password_456!}@tcp(mysql-master:3306)/shortlink?charset=utf8mb4&parseTime=True&loc=Local
+      - MYSQL_SLAVE1_DSN=shortlink:${MYSQL_PASSWORD:-shortlink_secure_password_456!}@tcp(mysql-slave1:3306)/shortlink?charset=utf8mb4&parseTime=True&loc=Local
+      - MYSQL_SLAVE2_DSN=shortlink:${MYSQL_PASSWORD:-shortlink_secure_password_456!}@tcp(mysql-slave2:3306)/shortlink?charset=utf8mb4&parseTime=True&loc=Local
+      - REDIS_CLUSTER_ADDRS=redis-node-1:7001,redis-node-2:7002,redis-node-3:7003,redis-node-4:7004,redis-node-5:7005,redis-node-6:7006
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-redis_secure_password_789!}
+      - GIN_MODE=release
+    networks:
+      - shortlink-network
+
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: shortlink-nginx
     restart: always
     ports:
-      - "6379:6379"
+      - "80:80"
     volumes:
-      - redis_data:/data
-    command: redis-server --appendonly yes # 开启 AOF 持久化，防止断电导致缓存全丢（面试高频考点）
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - shortlink-app-1
+      - shortlink-app-2
+      - shortlink-app-3
+    networks:
+      - shortlink-network
 
-# 定义命名数据卷，交由 Docker 引擎管理
 volumes:
-  mysql_data:
-  redis_data:
+  mysql_master_data:
+  mysql_slave1_data:
+  mysql_slave2_data:
+  redis_node_1_data:
+  redis_node_2_data:
+  redis_node_3_data:
+  redis_node_4_data:
+  redis_node_5_data:
+  redis_node_6_data:

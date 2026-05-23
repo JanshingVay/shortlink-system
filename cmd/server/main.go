@@ -21,9 +21,10 @@ func main() {
 
 	// 2. 初始化存储层
 	storageCfg := repository.Config{
-		MySQLDSN:  cfg.Database.MySQL.DSN,
-		RedisAddr: cfg.Database.Redis.Addr,
-		RedisPass: cfg.Database.Redis.Pass,
+		MySQLMasterDSN: cfg.Database.MySQL.MasterDSN,
+		MySQLSlaveDSNs: cfg.Database.MySQL.SlaveDSNs,
+		RedisAddrs:     cfg.Database.Redis.ClusterAddrs,
+		RedisPass:      cfg.Database.Redis.Pass,
 	}
 	repo, err := repository.NewStorage(storageCfg)
 	if err != nil {
@@ -49,7 +50,7 @@ func main() {
 	// 策略：桶容量为 10，每秒产生 2 个令牌
 	// 意味着：允许瞬间爆发 10 个请求，但长期均速被限制在 2 QPS
 	// ==========================================
-	limiter := middleware.RateLimitMiddleware(repo.Redis, 10, 2)
+	limiter := middleware.RateLimitMiddleware(repo.RedisClient, 10, 2)
 
 	// 对生成短链接口应用限流器
 	// 将原来的 handler.RegisterRoutes(router) 拆解，以便精细化控制

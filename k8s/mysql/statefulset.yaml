@@ -1,0 +1,155 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql-master
+  namespace: shortlink-system
+spec:
+  serviceName: mysql-master
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql
+      role: master
+  template:
+    metadata:
+      labels:
+        app: mysql
+        role: master
+    spec:
+      containers:
+      - name: mysql
+        image: mysql:8.0
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: shortlink-secret
+              key: MYSQL_ROOT_PASSWORD
+        - name: MYSQL_DATABASE
+          value: shortlink
+        - name: MYSQL_USER
+          value: shortlink
+        - name: MYSQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: shortlink-secret
+              key: MYSQL_PASSWORD
+        - name: TZ
+          value: Asia/Shanghai
+        ports:
+        - containerPort: 3306
+        resources:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+          limits:
+            cpu: 2000m
+            memory: 2Gi
+        volumeMounts:
+        - name: mysql-data
+          mountPath: /var/lib/mysql
+        - name: mysql-config
+          mountPath: /etc/mysql/conf.d
+      volumes:
+      - name: mysql-config
+        configMap:
+          name: mysql-config
+  volumeClaimTemplates:
+  - metadata:
+      name: mysql-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 10Gi
+
+---
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-config
+  namespace: shortlink-system
+data:
+  master.cnf: |
+    [mysqld]
+    server-id=1
+    log-bin=mysql-bin
+    binlog-format=ROW
+    character-set-server=utf8mb4
+    collation-server=utf8mb4_unicode_ci
+    max-connections=1000
+
+---
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql-slave
+  namespace: shortlink-system
+spec:
+  serviceName: mysql-slave
+  replicas: 2
+  selector:
+    matchLabels:
+      app: mysql
+      role: slave
+  template:
+    metadata:
+      labels:
+        app: mysql
+        role: slave
+    spec:
+      containers:
+      - name: mysql
+        image: mysql:8.0
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: shortlink-secret
+              key: MYSQL_ROOT_PASSWORD
+        - name: TZ
+          value: Asia/Shanghai
+        ports:
+        - containerPort: 3306
+        resources:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+          limits:
+            cpu: 2000m
+            memory: 2Gi
+        volumeMounts:
+        - name: mysql-data
+          mountPath: /var/lib/mysql
+        - name: mysql-config
+          mountPath: /etc/mysql/conf.d
+      volumes:
+      - name: mysql-config
+        configMap:
+          name: mysql-slave-config
+  volumeClaimTemplates:
+  - metadata:
+      name: mysql-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 10Gi
+
+---
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-slave-config
+  namespace: shortlink-system
+data:
+  slave.cnf: |
+    [mysqld]
+    server-id=2
+    read-only=1
+    character-set-server=utf8mb4
+    collation-server=utf8mb4_unicode_ci
+    max-connections=1000

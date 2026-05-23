@@ -2,6 +2,9 @@ package config
 
 import (
 	"fmt"
+	"os"
+	"strings"
+
 	"github.com/spf13/viper"
 )
 
@@ -18,12 +21,12 @@ type ServerConfig struct {
 
 type DatabaseConfig struct {
 	MySQL struct {
-		DSN string `mapstructure:"dsn"`
+		MasterDSN string   `mapstructure:"master_dsn"`
+		SlaveDSNs []string `mapstructure:"slave_dsns"`
 	} `mapstructure:"mysql"`
 	Redis struct {
-		Addr string `mapstructure:"addr"`
-		Pass string `mapstructure:"pass"`
-		DB   int    `mapstructure:"db"`
+		ClusterAddrs []string `mapstructure:"cluster_addrs"`
+		Pass         string   `mapstructure:"pass"`
 	} `mapstructure:"redis"`
 }
 
@@ -34,7 +37,7 @@ type AppConfig struct {
 
 func LoadConfig(path string) (*Config, error) {
 	viper.SetConfigFile(path)
-	viper.AutomaticEnv() // 开启自动读取环境变量，云原生关键：K8s 可以通过 ENV 覆盖 YAML 配置
+	viper.AutomaticEnv()
 
 	if err := viper.ReadInConfig(); err != nil {
 		return nil, fmt.Errorf("读取配置文件失败: %w", err)
@@ -43,6 +46,37 @@ func LoadConfig(path string) (*Config, error) {
 	var cfg Config
 	if err := viper.Unmarshal(&cfg); err != nil {
 		return nil, fmt.Errorf("解析配置失败: %w", err)
+	}
+
+	if masterDSN := os.Getenv("MYSQL_MASTER_DSN"); masterDSN != "" {
+		cfg.Database.MySQL.MasterDSN = masterDSN
+	}
+
+	var slaveDSNs []string
+	if slave1DSN := os.Getenv("MYSQL_SLAVE1_DSN"); slave1DSN != "" {
+		slaveDSNs = append(slaveDSNs, slave1DSN)
+	}
+	if slave2DSN := os.Getenv("MYSQL_SLAVE2_DSN"); slave2DSN != "" {
+		slaveDSNs = append(slaveDSNs, slave2DSN)
+	}
+	if len(slaveDSNs) > 0 {
+		cfg.Database.MySQL.SlaveDSNs = slaveDSNs
+	}
+
+	if redisAddrs := os.Getenv("REDIS_CLUSTER_ADDRS"); redisAddrs != "" {
+		cfg.Database.Redis.ClusterAddrs = strings.Split(redisAddrs, ",")
+	}
+
+	if redisPass := os.Getenv("REDIS_PASSWORD"); redisPass != "" {
+		cfg.Database.Redis.Pass = redisPass
+	}
+
+	if ginMode := os.Getenv("GIN_MODE"); ginMode != "" {
+		cfg.Server.Mode = ginMode
+	}
+
+	if urlPrefix := os.Getenv("URL_PREFIX"); urlPrefix != "" {
+		cfg.App.URLPrefix = urlPrefix
 	}
 
 	return &cfg, nil

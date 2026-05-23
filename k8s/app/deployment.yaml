@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shortlink-app
+  namespace: shortlink-system
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: shortlink-app
+  template:
+    metadata:
+      labels:
+        app: shortlink-app
+    spec:
+      containers:
+      - name: shortlink-app
+        image: shortlink-app:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8080
+        resources:
+          requests:
+            cpu: 200m
+            memory: 256Mi
+          limits:
+            cpu: 1000m
+            memory: 1Gi
+        env:
+        - name: MYSQL_MASTER_DSN
+          value: "shortlink:$(MYSQL_PASSWORD)@tcp(mysql-master:3306)/shortlink?charset=utf8mb4&parseTime=True&loc=Local"
+        - name: MYSQL_SLAVE1_DSN
+          value: "shortlink:$(MYSQL_PASSWORD)@tcp(mysql-slave-0.mysql-slave:3306)/shortlink?charset=utf8mb4&parseTime=True&loc=Local"
+        - name: MYSQL_SLAVE2_DSN
+          value: "shortlink:$(MYSQL_PASSWORD)@tcp(mysql-slave-1.mysql-slave:3306)/shortlink?charset=utf8mb4&parseTime=True&loc=Local"
+        - name: REDIS_CLUSTER_ADDRS
+          valueFrom:
+            configMapKeyRef:
+              name: shortlink-config
+              key: REDIS_CLUSTER_HOSTS
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: shortlink-secret
+              key: REDIS_PASSWORD
+        - name: GIN_MODE
+          valueFrom:
+            configMapKeyRef:
+              name: shortlink-config
+              key: GIN_MODE
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 5

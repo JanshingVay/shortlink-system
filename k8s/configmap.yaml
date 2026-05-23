@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: shortlink-config
+  namespace: shortlink-system
+data:
+  GIN_MODE: "release"
+  MYSQL_MASTER_HOST: "mysql-master"
+  MYSQL_SLAVE_HOSTS: "mysql-slave-0.mysql-slave,mysql-slave-1.mysql-slave"
+  REDIS_CLUSTER_HOSTS: "redis-node-0.redis:7001,redis-node-1.redis:7002,redis-node-2.redis:7003,redis-node-3.redis:7004,redis-node-4.redis:7005,redis-node-5.redis:7006"

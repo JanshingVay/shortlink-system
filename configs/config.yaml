@@ -1,14 +1,22 @@
 server:
   port: 8080
-  mode: "debug" # 生产环境改为 "release"
+  mode: "debug"
 
 database:
   mysql:
-    dsn: "root:wjxmhcjlyAzg04@tcp(127.0.0.1:3306)/shortlink?charset=utf8mb4&parseTime=True&loc=Local"
+    master_dsn: "root:123456@tcp(127.0.0.1:3306)/shortlink?charset=utf8mb4&parseTime=True&loc=Local"
+    slave_dsns:
+      - "root:123456@tcp(127.0.0.1:3307)/shortlink?charset=utf8mb4&parseTime=True&loc=Local"
+      - "root:123456@tcp(127.0.0.1:3308)/shortlink?charset=utf8mb4&parseTime=True&loc=Local"
   redis:
-    addr: "127.0.0.1:6379"
+    cluster_addrs:
+      - "127.0.0.1:7001"
+      - "127.0.0.1:7002"
+      - "127.0.0.1:7003"
+      - "127.0.0.1:7004"
+      - "127.0.0.1:7005"
+      - "127.0.0.1:7006"
     pass: ""
-    db: 0
 
 app:
   node_id: 1

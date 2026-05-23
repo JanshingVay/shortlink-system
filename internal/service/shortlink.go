@@ -37,7 +37,7 @@ func NewShortLinkService(prefix string, repo *repository.Storage) (*ShortLinkSer
 
 	// 2. 初始化 Redis 分布式布隆过滤器
 	// 预估 100 万数据量，5 个哈希函数，Key 命名规范化
-	redisBloom := bloom.NewRedisBloom(repo.Redis, "sys:bloom:shortcodes", 1_000_000, 5)
+	redisBloom := bloom.NewRedisBloom(repo.RedisClient, "sys:bloom:shortcodes", 1_000_000, 5)
 
 	return &ShortLinkService{
 		node:      node,
@@ -76,7 +76,7 @@ func (s *ShortLinkService) Create(ctx context.Context, longURL string) (string, 
 
 	// 4. 写入 Redis 缓存 (加入随机抖动过期时间，防止同一批生成的冷数据在同一时刻大面积失效引发雪崩)
 	expiration := s.generateJitterExpiration()
-	err = s.repo.Redis.Set(ctx, "shortlink:"+shortCode, longURL, expiration).Err()
+	err = s.repo.RedisClient.Set(ctx, "shortlink:"+shortCode, longURL, expiration).Err()
 	if err != nil {
 		// 缓存写入失败不应该阻塞主流程，记录错误即可
 		fmt.Printf("警告: Redis 缓存写入失败: %v\n", err)
@@ -104,7 +104,7 @@ func (s *ShortLinkService) Redirect(ctx context.Context, shortCode string) (stri
 	cacheKey := "shortlink:" + shortCode
 
 	// 2. 第二道防线：查 Redis 缓存 (承担 99% 的读流量)
-	longURL, err := s.repo.Redis.Get(ctx, cacheKey).Result()
+	longURL, err := s.repo.RedisClient.Get(ctx, cacheKey).Result()
 	if err == nil {
 		return longURL, nil // Cache Hit，直接起飞
 	} else if err != redis.Nil {
@@ -123,7 +123,7 @@ func (s *ShortLinkService) Redirect(ctx context.Context, shortCode string) (stri
 	}
 
 	// 4. Cache Aside 核心逻辑：回写缓存，并同样加入随机抖动防止雪崩
-	s.repo.Redis.Set(ctx, cacheKey, linkRecord.LongURL, s.generateJitterExpiration())
+	s.repo.RedisClient.Set(ctx, cacheKey, linkRecord.LongURL, s.generateJitterExpiration())
 
 	return linkRecord.LongURL, nil
 }

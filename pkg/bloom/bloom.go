@@ -10,7 +10,7 @@ var basePrimes = []uint32{7, 11, 13, 31, 37, 61, 89, 97, 101, 107}
 
 // RedisBloomFilter 分布式布隆过滤器
 type RedisBloomFilter struct {
-	client *redis.Client
+	client redis.Cmdable
 	key    string
 	size   uint64
 	seeds  []uint32
@@ -37,7 +37,7 @@ type RedisBloomFilter struct {
 //   - hashCount 不宜过大（>10），否则会增加 Redis Pipeline 指令数，提升 RTT 延迟
 //   - size 建议按 2^n 对齐（如 1<<20），减少取模运算开销
 //   - 单实例可复用，无需频繁创建（seeds 预生成，线程安全）
-func NewRedisBloom(client *redis.Client, key string, size uint64, hashCount int) *RedisBloomFilter {
+func NewRedisBloom(client redis.Cmdable, key string, size uint64, hashCount int) *RedisBloomFilter {
 	seeds := make([]uint32, hashCount)
 	for i := 0; i < hashCount; i++ {
 		seeds[i] = basePrimes[i%len(basePrimes)] + uint32(i)
