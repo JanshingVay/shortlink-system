@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
+	"sync/atomic"
 	"time"
 
 	"shortlink-system/internal/model"
@@ -15,9 +17,10 @@ import (
 )
 
 type Storage struct {
-	DB          *gorm.DB
+	MasterDB    *gorm.DB
 	SlaveDBs    []*gorm.DB
 	RedisClient redis.Cmdable
+	readIndex   int32
 }
 
 type Config struct {
@@ -46,18 +49,32 @@ func NewStorage(cfg Config) (*Storage, error) {
 	var redisClient redis.Cmdable
 	if len(cfg.RedisAddrs) > 1 {
 		redisClient = redis.NewClusterClient(&redis.ClusterOptions{
-			Addrs:        cfg.RedisAddrs,
-			Password:     cfg.RedisPass,
-			PoolSize:     100,
-			MinIdleConns: 10,
+			Addrs:           cfg.RedisAddrs,
+			Password:        cfg.RedisPass,
+			PoolSize:        500,
+			MinIdleConns:    50,
+			MaxIdleConns:    100,
+			ConnMaxIdleTime: 5 * time.Minute,
+			ConnMaxLifetime: 30 * time.Minute,
+			DialTimeout:     5 * time.Second,
+			ReadTimeout:     3 * time.Second,
+			WriteTimeout:    3 * time.Second,
+			ReadOnly:        false,
+			RouteByLatency:  true,
 		})
 	} else if len(cfg.RedisAddrs) == 1 {
 		redisClient = redis.NewClient(&redis.Options{
-			Addr:         cfg.RedisAddrs[0],
-			Password:     cfg.RedisPass,
-			DB:           0,
-			PoolSize:     100,
-			MinIdleConns: 10,
+			Addr:            cfg.RedisAddrs[0],
+			Password:        cfg.RedisPass,
+			DB:              0,
+			PoolSize:        500,
+			MinIdleConns:    50,
+			MaxIdleConns:    100,
+			ConnMaxIdleTime: 5 * time.Minute,
+			ConnMaxLifetime: 30 * time.Minute,
+			DialTimeout:     5 * time.Second,
+			ReadTimeout:     3 * time.Second,
+			WriteTimeout:    3 * time.Second,
 		})
 	} else {
 		return nil, fmt.Errorf("未配置 Redis 地址")
@@ -70,10 +87,87 @@ func NewStorage(cfg Config) (*Storage, error) {
 	}
 
 	return &Storage{
-		DB:          masterDB,
+		MasterDB:    masterDB,
 		SlaveDBs:    slaveDBs,
 		RedisClient: redisClient,
 	}, nil
+}
+
+func (s *Storage) GetReadDB(ctx context.Context) *gorm.DB {
+	if len(s.SlaveDBs) == 0 {
+		return s.MasterDB.WithContext(ctx)
+	}
+
+	idx := atomic.AddInt32(&s.readIndex, 1) % int32(len(s.SlaveDBs))
+	return s.SlaveDBs[idx].WithContext(ctx)
+}
+
+func (s *Storage) GetWriteDB(ctx context.Context) *gorm.DB {
+	return s.MasterDB.WithContext(ctx)
+}
+
+func (s *Storage) RedisSetWithHashTag(ctx context.Context, shortCode string, longURL string, ttl time.Duration) error {
+	key := s.GetRedisKeyWithHashTag(shortCode)
+	return s.RedisClient.Set(ctx, key, longURL, ttl).Err()
+}
+
+func (s *Storage) RedisGetWithHashTag(ctx context.Context, shortCode string) (string, error) {
+	key := s.GetRedisKeyWithHashTag(shortCode)
+	return s.RedisClient.Get(ctx, key).Result()
+}
+
+func (s *Storage) GetRedisKeyWithHashTag(shortCode string) string {
+	return fmt.Sprintf("shortlink:{%s}", shortCode)
+}
+
+func (s *Storage) GetBloomKeyWithHashTag(shortCode string) string {
+	return "sys:bloom:{shortcodes}"
+}
+
+func (s *Storage) BatchRedisSet(ctx context.Context, pairs map[string]string, ttl time.Duration) error {
+	if len(pairs) == 0 {
+		return nil
+	}
+
+	pipe := s.RedisClient.Pipeline()
+	for key, value := range pairs {
+		pipe.Set(ctx, key, value, ttl)
+	}
+	_, err := pipe.Exec(ctx)
+	return err
+}
+
+func (s *Storage) BatchRedisGet(ctx context.Context, keys []string) (map[string]string, error) {
+	if len(keys) == 0 {
+		return nil, nil
+	}
+
+	pipe := s.RedisClient.Pipeline()
+	cmds := make([]*redis.StringCmd, len(keys))
+	for i, key := range keys {
+		cmds[i] = pipe.Get(ctx, key)
+	}
+	_, err := pipe.Exec(ctx)
+	if err != nil && err != redis.Nil {
+		return nil, err
+	}
+
+	results := make(map[string]string, len(keys))
+	for i, key := range keys {
+		if val, err := cmds[i].Result(); err == nil {
+			results[key] = val
+		}
+	}
+	return results, nil
+}
+
+func ExtractHashTagKey(key string) string {
+	if strings.HasPrefix(key, "{") {
+		if idx := strings.Index(key, "}"); idx != -1 {
+			return key[1:idx]
+		}
+	}
+	return key
 }
 
 func initDB(dsn string) (*gorm.DB, error) {
@@ -89,9 +183,10 @@ func initDB(dsn string) (*gorm.DB, error) {
 		return nil, err
 	}
 
-	sqlDB.SetMaxOpenConns(100)
-	sqlDB.SetMaxIdleConns(20)
-	sqlDB.SetConnMaxLifetime(time.Hour)
+	sqlDB.SetMaxOpenConns(200)
+	sqlDB.SetMaxIdleConns(50)
+	sqlDB.SetConnMaxLifetime(2 * time.Hour)
+	sqlDB.SetConnMaxIdleTime(30 * time.Minute)
 
 	if err := db.AutoMigrate(&model.ShortLink{}); err != nil {
 		log.Printf("警告：自动迁移表结构失败: %v", err)
