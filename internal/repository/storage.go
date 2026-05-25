@@ -93,6 +93,23 @@ func NewStorage(cfg Config) (*Storage, error) {
 	}, nil
 }
 
+func (s *Storage) FindByLongURLHash(ctx context.Context, urlHash string) (*model.ShortLink, error) {
+	var link model.ShortLink
+	err := s.GetReadDB(ctx).Where("long_url_hash = ?", urlHash).First(&link).Error
+	if err != nil {
+		return nil, err
+	}
+	return &link, nil
+}
+
+func (s *Storage) RedisGetURLHash(ctx context.Context, urlHash string) (string, error) {
+	return s.RedisClient.Get(ctx, "urlhash:"+urlHash).Result()
+}
+
+func (s *Storage) RedisSetURLHash(ctx context.Context, urlHash, shortCode string, ttl time.Duration) error {
+	return s.RedisClient.Set(ctx, "urlhash:"+urlHash, shortCode, ttl).Err()
+}
+
 func (s *Storage) GetReadDB(ctx context.Context) *gorm.DB {
 	if len(s.SlaveDBs) == 0 {
 		return s.MasterDB.WithContext(ctx)

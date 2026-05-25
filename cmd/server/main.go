@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"log"
 	"net/http"
 	"os"
@@ -19,6 +20,9 @@ import (
 )
 
 func main() {
+	// 命令行参数：是否开启限流，默认开启
+	enableRateLimit := flag.Bool("rate-limit", true, "是否开启限流 (默认开启，使用 --rate-limit=false 关闭)")
+	flag.Parse()
 	cfg, err := config.LoadConfig("configs/config.yaml")
 	if err != nil {
 		log.Fatalf("加载配置失败: %v", err)
@@ -46,11 +50,21 @@ func main() {
 	router := gin.New()
 	router.Use(gin.Recovery())
 
-	limiter := middleware.RateLimitMiddleware(repo.RedisClient, 10, 2)
-
-	apiV1 := router.Group("/api/v1")
-	{
-		apiV1.POST("/shorten", limiter, handler.GenerateShortLink)
+	if *enableRateLimit {
+		limiter := middleware.RateLimitMiddleware(repo.RedisClient, 10, 2)
+		apiV1 := router.Group("/api/v1")
+		{
+			apiV1.POST("/encode", limiter, handler.GenerateShortLink)
+			apiV1.GET("/decode/:code", handler.Decode)
+		}
+		log.Println("[限流] 已开启，速率: 10容量 / 2req/s")
+	} else {
+		apiV1 := router.Group("/api/v1")
+		{
+			apiV1.POST("/encode", handler.GenerateShortLink)
+			apiV1.GET("/decode/:code", handler.Decode)
+		}
+		log.Println("[限流] 已关闭")
 	}
 
 	router.GET("/:code", handler.Redirect)

@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -61,14 +63,42 @@ func NewShortLinkService(prefix string, repo *repository.Storage) (*ShortLinkSer
 	return svc, nil
 }
 
-// Create 生成短链：雪花ID -> Base62 -> MySQL -> 异步 Redis + 异步 Bloom
-// 核心设计：MySQL 写入成功即可返回，Redis 缓存和布隆过滤器异步完成，
-// 对应「写主库后立即响应」的高性能模式，减少用户等待时间。
+// Create 生成短链：MD5 去重 → 雪花ID → Base62 → MySQL → 异步 Redis + 异步 Bloom
+// 核心设计：通过 MD5(long_url) 实现幂等去重，同一长链多次请求返回相同短链。
+// 查重链路：Redis urlhash 缓存 → MySQL unique 索引兜底。
 func (s *ShortLinkService) Create(ctx context.Context, longURL string) (string, error) {
 	if longURL == "" {
 		return "", errors.New("URL 不能为空")
 	}
 
+	urlHash := md5Hex(longURL)
+
+	// ==========================================
+	// L1: Redis 反向索引缓存 urlhash:{md5} → shortCode
+	// ==========================================
+	if shortCode, err := s.repo.RedisGetURLHash(ctx, urlHash); err == nil && shortCode != "" {
+		return s.urlPrefix + shortCode, nil
+	}
+
+	// ==========================================
+	// L2: MySQL 唯一索引兜底去重
+	// ==========================================
+	existing, err := s.repo.FindByLongURLHash(ctx, urlHash)
+	if err == nil {
+		// 已存在，回写 Redis 缓存
+		cacheTTL := s.generateJitterExpiration()
+		if setErr := s.repo.RedisSetURLHash(context.Background(), urlHash, existing.ShortCode, cacheTTL); setErr != nil {
+			fmt.Printf("警告: 回写 urlhash 缓存失败: %v\n", setErr)
+		}
+		return s.urlPrefix + existing.ShortCode, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", fmt.Errorf("查询去重失败: %w", err)
+	}
+
+	// ==========================================
+	// 不存在：生成新短链
+	// ==========================================
 	id, err := s.node.Generate()
 	if err != nil {
 		return "", fmt.Errorf("生成 ID 失败 (系统可能正遭遇严重时钟回拨): %w", err)
@@ -77,9 +107,10 @@ func (s *ShortLinkService) Create(ctx context.Context, longURL string) (string, 
 	shortCode := s.b62.Encode(uint64(id))
 
 	linkRecord := model.ShortLink{
-		ID:        uint64(id),
-		ShortCode: shortCode,
-		LongURL:   longURL,
+		ID:          uint64(id),
+		ShortCode:   shortCode,
+		LongURL:     longURL,
+		LongURLHash: urlHash,
 	}
 
 	if err := s.repo.GetWriteDB(ctx).Create(&linkRecord).Error; err != nil {
@@ -101,12 +132,21 @@ func (s *ShortLinkService) Create(ctx context.Context, longURL string) (string, 
 
 		s.l1Cache.Set("shortlink:"+shortCode, longURL)
 
+		if err := s.repo.RedisSetURLHash(bgCtx, urlHash, shortCode, expiration); err != nil {
+			fmt.Printf("警告: urlhash 缓存写入失败: %v\n", err)
+		}
+
 		if err := s.bloom.Add(bgCtx, shortCode); err != nil {
 			fmt.Printf("警告: 布隆过滤器更新失败: %v\n", err)
 		}
 	}()
 
 	return shortURL, nil
+}
+
+func md5Hex(s string) string {
+	h := md5.Sum([]byte(s))
+	return hex.EncodeToString(h[:])
 }
 
 // Redirect 短链跳转：Bloom 防穿透 -> L1 内存 -> L2 Redis -> L3 MySQL -> 逐级回写

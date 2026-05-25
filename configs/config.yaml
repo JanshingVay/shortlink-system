@@ -4,18 +4,11 @@ server:
 
 database:
   mysql:
-    master_dsn: "root:123456@tcp(127.0.0.1:3306)/shortlink?charset=utf8mb4&parseTime=True&loc=Local"
-    slave_dsns:
-      - "root:123456@tcp(127.0.0.1:3307)/shortlink?charset=utf8mb4&parseTime=True&loc=Local"
-      - "root:123456@tcp(127.0.0.1:3308)/shortlink?charset=utf8mb4&parseTime=True&loc=Local"
+    master_dsn: "shortlink:shortlink@tcp(localhost:3306)/shortlink?charset=utf8mb4&parseTime=True&loc=Local"
+    slave_dsns: []
   redis:
     cluster_addrs:
-      - "127.0.0.1:7001"
-      - "127.0.0.1:7002"
-      - "127.0.0.1:7003"
-      - "127.0.0.1:7004"
-      - "127.0.0.1:7005"
-      - "127.0.0.1:7006"
+      - "127.0.0.1:6379"
     pass: ""
 
 app:

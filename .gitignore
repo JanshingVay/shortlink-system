@@ -8,3 +8,4 @@
 .vscode/
 *.log
 deployments/.env
+seed_codes.txt

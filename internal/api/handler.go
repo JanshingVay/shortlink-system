@@ -43,6 +43,22 @@ func (h *Handler) GenerateShortLink(c *gin.Context) {
 	})
 }
 
+func (h *Handler) Decode(c *gin.Context) {
+	shortCode := c.Param("code")
+
+	longURL, err := h.svc.Redirect(c.Request.Context(), shortCode)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":       200,
+		"short_code": shortCode,
+		"long_url":   longURL,
+	})
+}
+
 // Redirect 短链重定向 API
 func (h *Handler) Redirect(c *gin.Context) {
 	// 获取 URL 路径中的短码，例如 GET /aZ3kP9 中的 "aZ3kP9"
@@ -61,6 +77,7 @@ func (h *Handler) Redirect(c *gin.Context) {
 
 // RegisterRoutes 注册所有的 API 路由
 func (h *Handler) RegisterRoutes(router *gin.Engine) {
-	router.POST("/api/v1/shorten", h.GenerateShortLink) // 生成接口
-	router.GET("/:code", h.Redirect)                    // 重定向接口
+	router.POST("/api/v1/encode", h.GenerateShortLink)
+	router.GET("/api/v1/decode/:code", h.Decode)
+	router.GET("/:code", h.Redirect)
 }
