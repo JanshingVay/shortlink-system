@@ -72,6 +72,22 @@ services:
     networks:
       - shortlink-network
 
+  rabbitmq:
+    image: rabbitmq:3.12-management-alpine
+    container_name: shortlink-rabbitmq
+    restart: always
+    hostname: shortlink-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - shortlink-network
+
   redis-node-1:
     image: redis:7.0-alpine
     container_name: shortlink-redis-node-1
@@ -220,6 +236,7 @@ services:
       - mysql-master
       - mysql-slave1
       - mysql-slave2
+      - rabbitmq
       - redis-node-1
       - redis-node-2
       - redis-node-3
@@ -232,6 +249,7 @@ services:
       - MYSQL_SLAVE2_DSN=shortlink:${MYSQL_PASSWORD:-shortlink_secure_password_456!}@tcp(mysql-slave2:3306)/shortlink?charset=utf8mb4&parseTime=True&loc=Local
       - REDIS_CLUSTER_ADDRS=redis-node-1:7001,redis-node-2:7002,redis-node-3:7003,redis-node-4:7004,redis-node-5:7005,redis-node-6:7006
       - REDIS_PASSWORD=${REDIS_PASSWORD:-redis_secure_password_789!}
+      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD:-guest}@shortlink-rabbitmq:5672/
       - GIN_MODE=release
     networks:
       - shortlink-network
@@ -246,6 +264,7 @@ services:
       - mysql-master
       - mysql-slave1
       - mysql-slave2
+      - rabbitmq
       - redis-node-1
       - redis-node-2
       - redis-node-3
@@ -258,6 +277,7 @@ services:
       - MYSQL_SLAVE2_DSN=shortlink:${MYSQL_PASSWORD:-shortlink_secure_password_456!}@tcp(mysql-slave2:3306)/shortlink?charset=utf8mb4&parseTime=True&loc=Local
       - REDIS_CLUSTER_ADDRS=redis-node-1:7001,redis-node-2:7002,redis-node-3:7003,redis-node-4:7004,redis-node-5:7005,redis-node-6:7006
       - REDIS_PASSWORD=${REDIS_PASSWORD:-redis_secure_password_789!}
+      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD:-guest}@shortlink-rabbitmq:5672/
       - GIN_MODE=release
     networks:
       - shortlink-network
@@ -272,6 +292,7 @@ services:
       - mysql-master
       - mysql-slave1
       - mysql-slave2
+      - rabbitmq
       - redis-node-1
       - redis-node-2
       - redis-node-3
@@ -284,6 +305,7 @@ services:
       - MYSQL_SLAVE2_DSN=shortlink:${MYSQL_PASSWORD:-shortlink_secure_password_456!}@tcp(mysql-slave2:3306)/shortlink?charset=utf8mb4&parseTime=True&loc=Local
       - REDIS_CLUSTER_ADDRS=redis-node-1:7001,redis-node-2:7002,redis-node-3:7003,redis-node-4:7004,redis-node-5:7005,redis-node-6:7006
       - REDIS_PASSWORD=${REDIS_PASSWORD:-redis_secure_password_789!}
+      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD:-guest}@shortlink-rabbitmq:5672/
       - GIN_MODE=release
     networks:
       - shortlink-network
@@ -307,6 +329,7 @@ volumes:
   mysql_master_data:
   mysql_slave1_data:
   mysql_slave2_data:
+  rabbitmq_data:
   redis_node_1_data:
   redis_node_2_data:
   redis_node_3_data:

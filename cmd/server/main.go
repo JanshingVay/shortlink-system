@@ -14,7 +14,9 @@ import (
 	"shortlink-system/internal/middleware"
 	"shortlink-system/internal/repository"
 	"shortlink-system/internal/service"
+	"shortlink-system/internal/worker"
 	"shortlink-system/pkg/config"
+	"shortlink-system/pkg/mq"
 
 	"github.com/gin-gonic/gin"
 )
@@ -43,6 +45,29 @@ func main() {
 	if err != nil {
 		log.Fatalf("初始化 Service 失败: %v", err)
 	}
+
+	// 初始化 RabbitMQ
+	rabbitMQURL := cfg.MQ.RabbitMQ.URL
+	if rabbitMQURL == "" {
+		rabbitMQURL = "amqp://guest:guest@localhost:5672/"
+	}
+	mqClient, err := mq.NewRabbitMQ(rabbitMQURL)
+	if err != nil {
+		log.Fatalf("初始化 RabbitMQ 失败: %v", err)
+	}
+	defer mqClient.Close()
+
+	// 启动 Outbox Worker：扫描 outbox 表并推送消息到 RabbitMQ
+	outboxWorker := worker.NewOutboxWorker(repo, mqClient)
+	go outboxWorker.Start(context.Background())
+
+	// 启动缓存同步消费者：从 RabbitMQ 消费消息并更新 Redis/Bloom
+	cacheConsumer := worker.NewCacheSyncConsumer(repo, svc.L1Cache(), svc.Bloom())
+	go func() {
+		if err := cacheConsumer.Start(context.Background(), mqClient); err != nil {
+			log.Printf("缓存同步消费者退出: %v", err)
+		}
+	}()
 
 	handler := api.NewHandler(svc)
 
@@ -96,6 +121,8 @@ func main() {
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Fatalf("服务关闭异常: %v", err)
 	}
+
+	outboxWorker.Stop()
 
 	log.Println("服务已安全关闭")
 }

@@ -1,0 +1,18 @@
+-- scripts/outbox.sql
+-- 事务发件箱表：用于保证业务写入与缓存更新消息的原子性
+CREATE TABLE IF NOT EXISTS `outbox_messages` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `short_code` VARCHAR(10) NOT NULL COMMENT '短码',
+  `long_url` VARCHAR(2048) NOT NULL COMMENT '原始长链接',
+  `url_hash` CHAR(32) NOT NULL COMMENT 'long_url的MD5哈希',
+  `status` VARCHAR(20) NOT NULL DEFAULT 'pending' COMMENT '消息状态 pending/sent/failed',
+  `retry_count` INT NOT NULL DEFAULT 0 COMMENT '重试次数',
+  `created_at` DATETIME(3) NULL DEFAULT NULL COMMENT '创建时间',
+  `updated_at` DATETIME(3) NULL DEFAULT NULL COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_outbox_status_created_at` (`status`, `created_at`),
+  KEY `idx_outbox_retry_count` (`retry_count`)
+) ENGINE=InnoDB
+  DEFAULT CHARSET=utf8mb4
+  COLLATE=utf8mb4_unicode_ci
+  COMMENT='事务发件箱表';

@@ -216,7 +216,7 @@ func initDB(dsn string) (*gorm.DB, error) {
 	sqlDB.SetConnMaxLifetime(2 * time.Hour)
 	sqlDB.SetConnMaxIdleTime(30 * time.Minute)
 
-	if err := db.AutoMigrate(&model.ShortLink{}); err != nil {
+	if err := db.AutoMigrate(&model.ShortLink{}, &model.OutboxMessage{}); err != nil {
 		log.Printf("警告：自动迁移表结构失败: %v", err)
 	}
 

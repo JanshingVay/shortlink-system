@@ -14,3 +14,7 @@ database:
 app:
   node_id: 1
   url_prefix: "http://localhost:8080/"
+
+mq:
+  rabbitmq:
+    url: "amqp://guest:guest@localhost:5672/"

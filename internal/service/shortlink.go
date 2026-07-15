@@ -113,44 +113,45 @@ func (s *ShortLinkService) Create(ctx context.Context, longURL string) (string, 
 		LongURLHash: urlHash,
 	}
 
-	if err := s.repo.GetWriteDB(ctx).Create(&linkRecord).Error; err != nil {
+	// 开启事务：同时写入业务表和 outbox 表，保证原子性
+	tx := s.repo.GetWriteDB(ctx).Begin()
+	if tx.Error != nil {
+		return "", fmt.Errorf("开启事务失败: %w", tx.Error)
+	}
+
+	if err := tx.Create(&linkRecord).Error; err != nil {
+		tx.Rollback()
 		return "", fmt.Errorf("数据库写入失败: %w", err)
+	}
+
+	outboxMsg := &model.OutboxMessage{
+		ShortCode: shortCode,
+		LongURL:   longURL,
+		URLHash:   urlHash,
+		Status:    "pending",
+	}
+	if err := s.repo.CreateOutbox(tx, outboxMsg); err != nil {
+		tx.Rollback()
+		return "", fmt.Errorf("写入 outbox 失败: %w", err)
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		return "", fmt.Errorf("事务提交失败: %w", err)
 	}
 
 	shortURL := s.urlPrefix + shortCode
 
-	expiration := s.generateJitterExpiration()
-
-	go func() {
-		bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		// 带重试地写入 Redis 正向缓存 shortlink:{code} -> longURL
-		if err := s.withRetry(bgCtx, 3, func(ctx context.Context) error {
-			return s.repo.RedisClient.Set(ctx, "shortlink:"+shortCode, longURL, expiration).Err()
-		}); err != nil {
-			fmt.Printf("警告: Redis 缓存写入失败: %v\n", err)
-			return
-		}
-
-		s.l1Cache.Set("shortlink:"+shortCode, longURL)
-
-		// 带重试地写入 urlhash 反向索引
-		if err := s.withRetry(bgCtx, 3, func(ctx context.Context) error {
-			return s.repo.RedisSetURLHash(ctx, urlHash, shortCode, expiration)
-		}); err != nil {
-			fmt.Printf("警告: urlhash 缓存写入失败: %v\n", err)
-		}
-
-		// 带重试地更新布隆过滤器
-		if err := s.withRetry(bgCtx, 3, func(ctx context.Context) error {
-			return s.bloom.Add(ctx, shortCode)
-		}); err != nil {
-			fmt.Printf("警告: 布隆过滤器更新失败: %v\n", err)
-		}
-	}()
-
 	return shortURL, nil
+}
+
+// L1Cache 返回本地 L1 缓存实例，供外部组件（如消费者）使用。
+func (s *ShortLinkService) L1Cache() *cache.L1Cache {
+	return s.l1Cache
+}
+
+// Bloom 返回布隆过滤器实例，供外部组件（如消费者）使用。
+func (s *ShortLinkService) Bloom() *bloom.RedisBloomFilter {
+	return s.bloom
 }
 
 func md5Hex(s string) string {

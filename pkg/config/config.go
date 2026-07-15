@@ -11,6 +11,7 @@ type Config struct {
 	Server   ServerConfig   `mapstructure:"server"`
 	Database DatabaseConfig `mapstructure:"database"`
 	App      AppConfig      `mapstructure:"app"`
+	MQ       MQConfig       `mapstructure:"mq"`
 }
 
 type ServerConfig struct {
@@ -21,12 +22,18 @@ type ServerConfig struct {
 type DatabaseConfig struct {
 	MySQL struct {
 		MasterDSN string   `mapstructure:"master_dsn"`
-		SlaveDSNs []string `mapstructure:"slave_dsns"`
+		SlaveDSNs  []string `mapstructure:"slave_dsns"`
 	} `mapstructure:"mysql"`
 	Redis struct {
 		ClusterAddrs []string `mapstructure:"cluster_addrs"`
 		Pass         string   `mapstructure:"pass"`
 	} `mapstructure:"redis"`
+}
+
+type MQConfig struct {
+	RabbitMQ struct {
+		URL string `mapstructure:"url"`
+	} `mapstructure:"rabbitmq"`
 }
 
 type AppConfig struct {
@@ -65,6 +72,7 @@ func bindEnv(v *viper.Viper) {
 		"database.redis.pass":          {"DATABASE_REDIS_PASS", "REDIS_PASSWORD"},
 		"app.node_id":                  {"APP_NODE_ID"},
 		"app.url_prefix":               {"APP_URL_PREFIX", "URL_PREFIX"},
+		"mq.rabbitmq.url":              {"MQ_RABBITMQ_URL", "RABBITMQ_URL"},
 	}
 
 	for key, envs := range bindings {
