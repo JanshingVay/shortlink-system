@@ -81,9 +81,9 @@ func (s *ShortLinkService) Create(ctx context.Context, longURL string) (string, 
 	}
 
 	// ==========================================
-	// L2: MySQL 唯一索引兜底去重
+	// L2: MySQL 唯一索引兜底去重（走主库，避免主从延迟读到旧数据）
 	// ==========================================
-	existing, err := s.repo.FindByLongURLHash(ctx, urlHash)
+	existing, err := s.repo.FindByLongURLHashFromMaster(ctx, urlHash)
 	if err == nil {
 		// 已存在，回写 Redis 缓存
 		cacheTTL := s.generateJitterExpiration()
@@ -122,21 +122,30 @@ func (s *ShortLinkService) Create(ctx context.Context, longURL string) (string, 
 	expiration := s.generateJitterExpiration()
 
 	go func() {
-		bgCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		if err := s.repo.RedisClient.Set(bgCtx, "shortlink:"+shortCode, longURL, expiration).Err(); err != nil {
+		// 带重试地写入 Redis 正向缓存 shortlink:{code} -> longURL
+		if err := s.withRetry(bgCtx, 3, func(ctx context.Context) error {
+			return s.repo.RedisClient.Set(ctx, "shortlink:"+shortCode, longURL, expiration).Err()
+		}); err != nil {
 			fmt.Printf("警告: Redis 缓存写入失败: %v\n", err)
 			return
 		}
 
 		s.l1Cache.Set("shortlink:"+shortCode, longURL)
 
-		if err := s.repo.RedisSetURLHash(bgCtx, urlHash, shortCode, expiration); err != nil {
+		// 带重试地写入 urlhash 反向索引
+		if err := s.withRetry(bgCtx, 3, func(ctx context.Context) error {
+			return s.repo.RedisSetURLHash(ctx, urlHash, shortCode, expiration)
+		}); err != nil {
 			fmt.Printf("警告: urlhash 缓存写入失败: %v\n", err)
 		}
 
-		if err := s.bloom.Add(bgCtx, shortCode); err != nil {
+		// 带重试地更新布隆过滤器
+		if err := s.withRetry(bgCtx, 3, func(ctx context.Context) error {
+			return s.bloom.Add(ctx, shortCode)
+		}); err != nil {
 			fmt.Printf("警告: 布隆过滤器更新失败: %v\n", err)
 		}
 	}()
@@ -157,6 +166,9 @@ func (s *ShortLinkService) Redirect(ctx context.Context, shortCode string) (stri
 	// L1: 本地内存缓存（0 网络开销，纳秒级）
 	// ==========================================
 	if value, ok := s.l1Cache.Get(cacheKey); ok {
+		if value == "" {
+			return "", errors.New("短链不存在")
+		}
 		return value, nil
 	}
 
@@ -177,6 +189,10 @@ func (s *ShortLinkService) Redirect(ctx context.Context, shortCode string) (stri
 	// ==========================================
 	longURL, err := s.repo.RedisClient.Get(ctx, cacheKey).Result()
 	if err == nil {
+		if longURL == "" {
+			s.l1Cache.Set(cacheKey, "")
+			return "", errors.New("短链不存在")
+		}
 		s.l1Cache.Set(cacheKey, longURL)
 		return longURL, nil
 	}
@@ -192,7 +208,10 @@ func (s *ShortLinkService) Redirect(ctx context.Context, shortCode string) (stri
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			// 空值缓存：5 分钟，防止攻击者重复穿透到 MySQL
-			s.repo.RedisClient.Set(ctx, cacheKey+":null", "1", 5*time.Minute)
+			if setErr := s.repo.RedisClient.Set(ctx, cacheKey, "", 5*time.Minute).Err(); setErr != nil {
+				fmt.Printf("警告: 空值缓存写入失败: %v\n", setErr)
+			}
+			s.l1Cache.Set(cacheKey, "")
 			return "", errors.New("短链不存在")
 		}
 		return "", fmt.Errorf("数据库查询失败: %w", err)
@@ -218,4 +237,24 @@ func (s *ShortLinkService) generateJitterExpiration() time.Duration {
 	jitter := time.Duration(s.randSrc.Intn(3600)) * time.Second
 	s.randMu.Unlock()
 	return base + jitter
+}
+
+// withRetry 带指数退避的重试执行器，用于提高异步缓存写操作的可靠性。
+func (s *ShortLinkService) withRetry(ctx context.Context, maxAttempts int, fn func(context.Context) error) error {
+	var lastErr error
+	for i := 0; i < maxAttempts; i++ {
+		if i > 0 {
+			select {
+			case <-time.After(time.Duration(i*100) * time.Millisecond):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		if err := fn(ctx); err == nil {
+			return nil
+		} else {
+			lastErr = err
+		}
+	}
+	return lastErr
 }

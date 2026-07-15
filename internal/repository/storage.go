@@ -102,6 +102,17 @@ func (s *Storage) FindByLongURLHash(ctx context.Context, urlHash string) (*model
 	return &link, nil
 }
 
+// FindByLongURLHashFromMaster 从 MySQL 主库查询 long_url_hash 对应的短链记录。
+// 用于 Create 流程中的去重查询，避免主从延迟导致读取到旧数据。
+func (s *Storage) FindByLongURLHashFromMaster(ctx context.Context, urlHash string) (*model.ShortLink, error) {
+	var link model.ShortLink
+	err := s.GetWriteDB(ctx).Where("long_url_hash = ?", urlHash).First(&link).Error
+	if err != nil {
+		return nil, err
+	}
+	return &link, nil
+}
+
 func (s *Storage) RedisGetURLHash(ctx context.Context, urlHash string) (string, error) {
 	return s.RedisClient.Get(ctx, "urlhash:"+urlHash).Result()
 }
