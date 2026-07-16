@@ -13,7 +13,7 @@ echo "等待 Redis 节点启动..."
 sleep 20
 
 echo "创建 Redis 集群..."
-docker run --rm --network shortlink-network redis:7.0-alpine redis-cli --cluster create \
+docker run --rm --network deployments_shortlink-network redis:7.0-alpine redis-cli --cluster create \
   redis-node-1:7001 \
   redis-node-2:7002 \
   redis-node-3:7003 \

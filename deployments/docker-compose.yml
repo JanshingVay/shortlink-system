@@ -73,7 +73,7 @@ services:
       - shortlink-network
 
   rabbitmq:
-    image: rabbitmq:3.12-management-alpine
+    image: rabbitmq:3.12-management
     container_name: shortlink-rabbitmq
     restart: always
     hostname: shortlink-rabbitmq
@@ -231,6 +231,7 @@ services:
       context: ..
       dockerfile: deployments/Dockerfile
     container_name: shortlink-app-1
+    command: ["./shortlink-server", "--rate-limit=false"]
     restart: always
     depends_on:
       - mysql-master
@@ -259,6 +260,7 @@ services:
       context: ..
       dockerfile: deployments/Dockerfile
     container_name: shortlink-app-2
+    command: ["./shortlink-server", "--rate-limit=false"]
     restart: always
     depends_on:
       - mysql-master
@@ -287,6 +289,7 @@ services:
       context: ..
       dockerfile: deployments/Dockerfile
     container_name: shortlink-app-3
+    command: ["./shortlink-server", "--rate-limit=false"]
     restart: always
     depends_on:
       - mysql-master
