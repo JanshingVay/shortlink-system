@@ -31,14 +31,14 @@ type Config struct {
 }
 
 func NewStorage(cfg Config) (*Storage, error) {
-	masterDB, err := initDB(cfg.MySQLMasterDSN)
+	masterDB, err := initDB(cfg.MySQLMasterDSN, true)
 	if err != nil {
 		return nil, fmt.Errorf("连接 MySQL 主库失败: %w", err)
 	}
 
 	var slaveDBs []*gorm.DB
 	for _, dsn := range cfg.MySQLSlaveDSNs {
-		slaveDB, err := initDB(dsn)
+		slaveDB, err := initDB(dsn, false)
 		if err != nil {
 			log.Printf("警告: 连接 MySQL 从库失败 [%s]: %v", dsn, err)
 			continue
@@ -95,7 +95,7 @@ func NewStorage(cfg Config) (*Storage, error) {
 
 func (s *Storage) FindByLongURLHash(ctx context.Context, urlHash string) (*model.ShortLink, error) {
 	var link model.ShortLink
-	err := s.GetReadDB(ctx).Where("long_url_hash = ?", urlHash).First(&link).Error
+	err := s.GetReadDB(ctx).Where("long_url_hash = ?", urlHash).Take(&link).Error
 	if err != nil {
 		return nil, err
 	}
@@ -106,11 +106,23 @@ func (s *Storage) FindByLongURLHash(ctx context.Context, urlHash string) (*model
 // 用于 Create 流程中的去重查询，避免主从延迟导致读取到旧数据。
 func (s *Storage) FindByLongURLHashFromMaster(ctx context.Context, urlHash string) (*model.ShortLink, error) {
 	var link model.ShortLink
-	err := s.GetWriteDB(ctx).Where("long_url_hash = ?", urlHash).First(&link).Error
+	err := s.GetWriteDB(ctx).Select("short_code").Where("long_url_hash = ?", urlHash).Take(&link).Error
 	if err != nil {
 		return nil, err
 	}
 	return &link, nil
+}
+
+// ListShortCodesAfter 按主键增量读取短码，用于后台重建 Bloom 过滤器。
+func (s *Storage) ListShortCodesAfter(ctx context.Context, lastID uint64, limit int) ([]model.ShortLink, error) {
+	var links []model.ShortLink
+	err := s.MasterDB.WithContext(ctx).
+		Select("id", "short_code").
+		Where("id > ?", lastID).
+		Order("id ASC").
+		Limit(limit).
+		Find(&links).Error
+	return links, err
 }
 
 func (s *Storage) RedisGetURLHash(ctx context.Context, urlHash string) (string, error) {
@@ -198,9 +210,10 @@ func ExtractHashTagKey(key string) string {
 	return key
 }
 
-func initDB(dsn string) (*gorm.DB, error) {
+func initDB(dsn string, migrate bool) (*gorm.DB, error) {
 	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Silent),
+		Logger:      logger.Default.LogMode(logger.Silent),
+		PrepareStmt: true,
 	})
 	if err != nil {
 		return nil, err
@@ -216,8 +229,10 @@ func initDB(dsn string) (*gorm.DB, error) {
 	sqlDB.SetConnMaxLifetime(2 * time.Hour)
 	sqlDB.SetConnMaxIdleTime(30 * time.Minute)
 
-	if err := db.AutoMigrate(&model.ShortLink{}, &model.OutboxMessage{}); err != nil {
-		log.Printf("警告：自动迁移表结构失败: %v", err)
+	if migrate {
+		if err := db.AutoMigrate(&model.ShortLink{}, &model.OutboxMessage{}); err != nil {
+			log.Printf("警告：自动迁移表结构失败: %v", err)
+		}
 	}
 
 	return db, nil

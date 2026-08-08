@@ -10,10 +10,11 @@ var basePrimes = []uint32{7, 11, 13, 31, 37, 61, 89, 97, 101, 107}
 
 // RedisBloomFilter 分布式布隆过滤器
 type RedisBloomFilter struct {
-	client redis.Cmdable
-	key    string
-	size   uint64
-	seeds  []uint32
+	client         redis.Cmdable
+	key            string
+	size           uint64
+	seeds          []uint32
+	containsScript *redis.Script
 }
 
 // NewRedisBloom 创建基于 Redis 的分布式布隆过滤器实例
@@ -48,6 +49,15 @@ func NewRedisBloom(client redis.Cmdable, key string, size uint64, hashCount int)
 		key:    key,
 		size:   size,
 		seeds:  seeds,
+		containsScript: redis.NewScript(`
+local key = KEYS[1]
+for i = 1, #ARGV do
+    if redis.call("GETBIT", key, ARGV[i]) == 0 then
+        return 0
+    end
+end
+return 1
+`),
 	}
 }
 
@@ -75,19 +85,24 @@ func NewRedisBloom(client redis.Cmdable, key string, size uint64, hashCount int)
 // - 建议通过 ctx.WithTimeout 控制超时，避免阻塞业务流程
 func (bf *RedisBloomFilter) Add(ctx context.Context, str string) error {
 	pipe := bf.client.Pipeline()
+	bf.QueueAdd(ctx, pipe, str)
+	_, err := pipe.Exec(ctx)
+	return err
+}
+
+// QueueAdd 将添加操作加入已有 Pipeline，供业务层合并多个 Redis 写入。
+func (bf *RedisBloomFilter) QueueAdd(ctx context.Context, pipe redis.Pipeliner, str string) {
 	for _, seed := range bf.seeds {
 		hashVal := bf.hash(str, seed)
 		offset := int64(hashVal % bf.size)
 		pipe.SetBit(ctx, bf.key, offset, 1)
 	}
-	_, err := pipe.Exec(ctx)
-	return err
 }
 
 // Contains 检查指定字符串是否存在于分布式布隆过滤器中
 // 核心原理：
 // 1. 布隆过滤器特性：若某字符串对应的任意一个 Bit 位为 0，则该字符串一定不存在；若所有位都为 1，仅表示“可能存在”（存在误判率）
-// 2. 性能优化：通过 Redis Pipeline 批量执行 GetBit 命令，将 N 次网络请求（N=哈希函数数量）压缩为 1 次，大幅降低网络 RTT 开销
+// 2. 性能优化：通过 Lua 在 Redis 服务端一次性执行多个 GetBit，减少客户端命令编排和响应解析开销
 //
 // 参数：
 //
@@ -103,27 +118,18 @@ func (bf *RedisBloomFilter) Add(ctx context.Context, str string) error {
 // - 结果为 true 时不代表字符串“一定存在”，仅为概率性判断（误判率由初始化时的 size 和 hashCount 决定）
 // - 结果为 false 时是 100% 准确的，可放心用于“不存在”的判断（如缓存穿透拦截）
 func (bf *RedisBloomFilter) Contains(ctx context.Context, str string) (bool, error) {
-	pipe := bf.client.Pipeline()
-	cmds := make([]*redis.IntCmd, len(bf.seeds))
-
+	args := make([]interface{}, len(bf.seeds))
 	for i, seed := range bf.seeds {
 		hashVal := bf.hash(str, seed)
 		offset := int64(hashVal % bf.size)
-		cmds[i] = pipe.GetBit(ctx, bf.key, offset)
+		args[i] = offset
 	}
 
-	_, err := pipe.Exec(ctx)
+	result, err := bf.containsScript.Run(ctx, bf.client, []string{bf.key}, args...).Int64()
 	if err != nil {
 		return false, err
 	}
-
-	// 只要有一个位是 0，就绝对不存在
-	for _, cmd := range cmds {
-		if cmd.Val() == 0 {
-			return false, nil
-		}
-	}
-	return true, nil
+	return result == 1, nil
 }
 
 // hash 基于指定种子对字符串进行自定义哈希计算

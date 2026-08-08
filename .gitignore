@@ -4,6 +4,7 @@
 *.bin
 /bin/
 .DS_Store
+.workbuddy/
 .idea/
 .vscode/
 *.log

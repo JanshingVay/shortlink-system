@@ -66,3 +66,34 @@ app:
 		t.Fatalf("URL 前缀未被环境变量覆盖: %s", cfg.App.URLPrefix)
 	}
 }
+
+func BenchmarkLoadConfig(b *testing.B) {
+	configPath := filepath.Join(b.TempDir(), "config.yaml")
+	content := []byte(`server:
+  port: 8080
+  mode: "release"
+database:
+  mysql:
+    master_dsn: "root:password@tcp(127.0.0.1:3306)/shortlink"
+    slave_dsns: []
+  redis:
+    cluster_addrs:
+      - "127.0.0.1:6379"
+    pass: ""
+app:
+  node_id: 1
+  url_prefix: "http://localhost/"
+mq:
+  rabbitmq:
+    url: "amqp://guest:guest@localhost:5672/"
+`)
+	if err := os.WriteFile(configPath, content, 0644); err != nil {
+		b.Fatalf("写入基准配置失败: %v", err)
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := LoadConfig(configPath); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

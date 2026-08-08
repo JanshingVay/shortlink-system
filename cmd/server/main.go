@@ -45,6 +45,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("初始化 Service 失败: %v", err)
 	}
+	go func() {
+		if err := svc.RebuildBloom(context.Background()); err != nil {
+			log.Printf("[Bloom] 后台重建失败，继续使用 Redis/MySQL 回源: %v", err)
+		}
+	}()
 
 	// 初始化 RabbitMQ
 	rabbitMQURL := cfg.MQ.RabbitMQ.URL
@@ -62,7 +67,7 @@ func main() {
 	go outboxWorker.Start(context.Background())
 
 	// 启动缓存同步消费者：从 RabbitMQ 消费消息并更新 Redis/Bloom
-	cacheConsumer := worker.NewCacheSyncConsumer(repo, svc.L1Cache(), svc.Bloom())
+	cacheConsumer := worker.NewCacheSyncConsumer(repo, svc.L1Cache(), svc.URLHashCache(), svc.Bloom())
 	go func() {
 		if err := cacheConsumer.Start(context.Background(), mqClient); err != nil {
 			log.Printf("缓存同步消费者退出: %v", err)

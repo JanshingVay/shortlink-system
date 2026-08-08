@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"net/http"
 	"shortlink-system/internal/service"
 
@@ -21,19 +20,24 @@ type CreateReq struct {
 	LongURL string `json:"long_url" binding:"required,url"` // Gin 自带 URL 格式校验
 }
 
+// respondError 统一错误响应结构，保证成功/失败都带有 code 字段，便于客户端统一处理。
+func respondError(c *gin.Context, status int, msg string) {
+	c.JSON(status, gin.H{"code": status, "error": msg})
+}
+
 // GenerateShortLink 处理长转短 API
 func (h *Handler) GenerateShortLink(c *gin.Context) {
 	var req CreateReq
 	// 校验 JSON 格式
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的请求参数或 URL 格式错误"})
+		respondError(c, http.StatusBadRequest, "无效的请求参数或 URL 格式错误")
 		return
 	}
 
-	// 调用业务逻辑
-	shortURL, err := h.svc.Create(context.Background(), req.LongURL)
+	// 使用请求上下文，使客户端断开 / 超时能正确传播到下游 DB、Redis 调用
+	shortURL, err := h.svc.Create(c.Request.Context(), req.LongURL)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "系统内部错误"})
+		respondError(c, http.StatusInternalServerError, "系统内部错误")
 		return
 	}
 
@@ -48,7 +52,7 @@ func (h *Handler) Decode(c *gin.Context) {
 
 	longURL, err := h.svc.Redirect(c.Request.Context(), shortCode)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		respondError(c, http.StatusNotFound, err.Error())
 		return
 	}
 
@@ -67,7 +71,7 @@ func (h *Handler) Redirect(c *gin.Context) {
 	longURL, err := h.svc.Redirect(c.Request.Context(), shortCode)
 	if err != nil {
 		// 如果被布隆过滤器拦截，返回 404
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		respondError(c, http.StatusNotFound, err.Error())
 		return
 	}
 

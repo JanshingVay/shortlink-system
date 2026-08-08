@@ -12,24 +12,26 @@ import (
 )
 
 const (
-	cacheTTLBase    = 24 * time.Hour
-	cacheTTLJitter  = 3600 * time.Second
-	nullCacheTTL    = 5 * time.Minute
+	cacheTTLBase   = 24 * time.Hour
+	cacheTTLJitter = 3600 * time.Second
+	nullCacheTTL   = 5 * time.Minute
 )
 
 // CacheSyncConsumer 缓存同步消费者
 type CacheSyncConsumer struct {
-	repo    *repository.Storage
-	l1Cache *cache.L1Cache
-	bloom   *bloom.RedisBloomFilter
+	repo         *repository.Storage
+	l1Cache      *cache.L1Cache
+	urlHashCache *cache.L1Cache
+	bloom        *bloom.RedisBloomFilter
 }
 
 // NewCacheSyncConsumer 创建缓存同步消费者
-func NewCacheSyncConsumer(repo *repository.Storage, l1Cache *cache.L1Cache, bloom *bloom.RedisBloomFilter) *CacheSyncConsumer {
+func NewCacheSyncConsumer(repo *repository.Storage, l1Cache, urlHashCache *cache.L1Cache, bloom *bloom.RedisBloomFilter) *CacheSyncConsumer {
 	return &CacheSyncConsumer{
-		repo:    repo,
-		l1Cache: l1Cache,
-		bloom:   bloom,
+		repo:         repo,
+		l1Cache:      l1Cache,
+		urlHashCache: urlHashCache,
+		bloom:        bloom,
 	}
 }
 
@@ -47,31 +49,23 @@ func (c *CacheSyncConsumer) handleMessage(msg mq.CacheUpdateMessage) error {
 	expiration := c.generateJitterExpiration()
 	shortCodeKey := "shortlink:" + msg.ShortCode
 
-	// 1. 写入 Redis 正向缓存 shortlink:{code} -> longURL
+	// 正向缓存、反向索引和 Bloom 置位合并到一个 Pipeline。
 	if err := c.withRetry(ctx, 3, func(ctx context.Context) error {
-		return c.repo.RedisClient.Set(ctx, shortCodeKey, msg.LongURL, expiration).Err()
+		pipe := c.repo.RedisClient.Pipeline()
+		pipe.Set(ctx, shortCodeKey, msg.LongURL, expiration)
+		pipe.Set(ctx, "urlhash:"+msg.URLHash, msg.ShortCode, expiration)
+		c.bloom.QueueAdd(ctx, pipe, msg.ShortCode)
+		_, err := pipe.Exec(ctx)
+		return err
 	}); err != nil {
-		log.Printf("[CacheSyncConsumer] 写入 Redis 正向缓存失败 [short_code=%s]: %v", msg.ShortCode, err)
+		log.Printf("[CacheSyncConsumer] 批量同步 Redis 缓存失败 [short_code=%s]: %v", msg.ShortCode, err)
 		return err
 	}
 
-	// 2. 写入本地 L1 缓存
+	// Redis 成功后再更新两个本地缓存。
 	c.l1Cache.Set(shortCodeKey, msg.LongURL)
-
-	// 3. 写入 Redis 反向索引 urlhash:{md5} -> shortCode
-	if err := c.withRetry(ctx, 3, func(ctx context.Context) error {
-		return c.repo.RedisSetURLHash(ctx, msg.URLHash, msg.ShortCode, expiration)
-	}); err != nil {
-		log.Printf("[CacheSyncConsumer] 写入 urlhash 缓存失败 [short_code=%s]: %v", msg.ShortCode, err)
-		return err
-	}
-
-	// 4. 更新布隆过滤器
-	if err := c.withRetry(ctx, 3, func(ctx context.Context) error {
-		return c.bloom.Add(ctx, msg.ShortCode)
-	}); err != nil {
-		log.Printf("[CacheSyncConsumer] 更新布隆过滤器失败 [short_code=%s]: %v", msg.ShortCode, err)
-		return err
+	if c.urlHashCache != nil {
+		c.urlHashCache.Set("urlhash:"+msg.URLHash, msg.ShortCode)
 	}
 
 	log.Printf("[CacheSyncConsumer] 缓存同步完成 [short_code=%s]", msg.ShortCode)

@@ -101,7 +101,7 @@ func TestRedisBloomFilter_Concurrency(t *testing.T) {
 	}
 
 	wg.Wait()
-	t.Log("Redis Pipeline 完美扛住高并发读写请求，无数据竞争！")
+	t.Log("Redis Pipeline 写入与 Lua 查询并发执行，无数据竞争！")
 }
 
 // 测试 3：极限查询性能压测 (模拟海量恶意请求的拦截)

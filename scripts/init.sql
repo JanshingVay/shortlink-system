@@ -23,12 +23,16 @@ CREATE TABLE IF NOT EXISTS `outbox_messages` (
   `short_code` VARCHAR(10) NOT NULL COMMENT '短码',
   `long_url` VARCHAR(2048) NOT NULL COMMENT '原始长链接',
   `url_hash` CHAR(32) NOT NULL COMMENT 'long_url的MD5哈希',
-  `status` VARCHAR(20) NOT NULL DEFAULT 'pending' COMMENT '消息状态 pending/sent/failed',
+  `status` VARCHAR(20) NOT NULL DEFAULT 'pending' COMMENT '消息状态 pending/processing/sent/failed',
   `retry_count` INT NOT NULL DEFAULT 0 COMMENT '重试次数',
+  `worker_id` VARCHAR(128) NOT NULL DEFAULT '' COMMENT '领取消息的Worker',
+  `locked_until` DATETIME(3) NULL DEFAULT NULL COMMENT '租约过期时间',
   `created_at` DATETIME(3) NULL DEFAULT NULL COMMENT '创建时间',
   `updated_at` DATETIME(3) NULL DEFAULT NULL COMMENT '更新时间',
   PRIMARY KEY (`id`),
   KEY `idx_outbox_status_created_at` (`status`, `created_at`),
+  KEY `idx_outbox_status_locked_until_created_at` (`status`, `locked_until`, `created_at`),
+  KEY `idx_outbox_status_updated_at` (`status`, `updated_at`),
   KEY `idx_outbox_retry_count` (`retry_count`)
 ) ENGINE=InnoDB
   DEFAULT CHARSET=utf8mb4
