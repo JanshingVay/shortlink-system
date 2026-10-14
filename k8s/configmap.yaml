@@ -7,4 +7,6 @@ data:
   GIN_MODE: "release"
   MYSQL_MASTER_HOST: "mysql-master"
   MYSQL_SLAVE_HOSTS: "mysql-slave-0.mysql-slave,mysql-slave-1.mysql-slave"
-  REDIS_CLUSTER_HOSTS: "redis-node-0.redis:7001,redis-node-1.redis:7002,redis-node-2.redis:7003,redis-node-3.redis:7004,redis-node-4.redis:7005,redis-node-5.redis:7006"
+  # 6 个 Redis Pod 共用同一份 redis.conf（port 7001），各自持有独立 Pod IP，
+  # 因此地址必须全部使用 7001；原先的 7002~7006 没有任何进程监听。
+  REDIS_CLUSTER_HOSTS: "redis-node-0.redis:7001,redis-node-1.redis:7001,redis-node-2.redis:7001,redis-node-3.redis:7001,redis-node-4.redis:7001,redis-node-5.redis:7001"

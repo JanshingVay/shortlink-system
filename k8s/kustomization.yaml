@@ -10,6 +10,7 @@ resources:
   - mysql/statefulset.yaml
   - redis/service.yaml
   - redis/statefulset.yaml
+  - redis/init-job.yaml
   - app/service.yaml
   - app/deployment.yaml
   - app/hpa.yaml

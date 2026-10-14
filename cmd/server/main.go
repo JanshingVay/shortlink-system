@@ -80,6 +80,12 @@ func main() {
 	router := gin.New()
 	router.Use(gin.Recovery())
 
+	// 健康检查路由必须在 /:code 通配路由之前注册。
+	// 缺失这两个路由会导致 K8s 探针命中 /:code 并拿到 404，
+	// 进而触发 Pod 反复重启且永远不 Ready。
+	healthHandler := api.NewHealthHandler(repo)
+	healthHandler.RegisterRoutes(router)
+
 	if *enableRateLimit {
 		limiter := middleware.RateLimitMiddleware(repo.RedisClient, 10, 2)
 		apiV1 := router.Group("/api/v1")

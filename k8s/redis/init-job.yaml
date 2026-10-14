@@ -1,0 +1,89 @@
+# Redis Cluster 初始化 Job。
+#
+# 背景：Redis 以 cluster-enabled 模式启动后并不会自动组网，必须显式执行一次
+# `redis-cli --cluster create` 才会分配 16384 个 slot 并选出主从。
+# 仓库原有 scripts/init-redis-cluster.sh 只面向 docker-compose
+# （docker run --network deployments_shortlink-network），K8s 下没有任何组件执行这一步，
+# 结果是应用连上 Redis 后拿到 CLUSTERDOWN / 无 slot，启动即失败。
+#
+# 该 Job 是幂等的：集群已处于 cluster_state:ok 时直接跳过，
+# 因此重复执行 `kubectl apply -k k8s/` 不会破坏已有集群。
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: redis-cluster-init
+  namespace: shortlink-system
+spec:
+  backoffLimit: 20
+  template:
+    metadata:
+      labels:
+        app: redis-cluster-init
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: init
+        image: redis:7.0-alpine
+        env:
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: shortlink-secret
+              key: REDIS_PASSWORD
+        # 6 个 Pod 共用 redis.conf（port 7001），各自独立 Pod IP，故端口统一为 7001。
+        - name: REDIS_NODES
+          value: "redis-node-0.redis:7001 redis-node-1.redis:7001 redis-node-2.redis:7001 redis-node-3.redis:7001 redis-node-4.redis:7001 redis-node-5.redis:7001"
+        command:
+        - sh
+        - -c
+        - |
+          set -eu
+
+          ping_node() {
+            host="${1%:*}"
+            port="${1##*:}"
+            redis-cli -h "$host" -p "$port" -a "$REDIS_PASSWORD" \
+              --no-auth-warning ping 2>/dev/null | grep -q PONG
+          }
+
+          cluster_state() {
+            host="${1%:*}"
+            port="${1##*:}"
+            redis-cli -h "$host" -p "$port" -a "$REDIS_PASSWORD" \
+              --no-auth-warning cluster info 2>/dev/null | grep -q "cluster_state:ok"
+          }
+
+          echo "[redis-init] 等待所有 Redis 节点就绪..."
+          for node in $REDIS_NODES; do
+            ready=0
+            i=1
+            while [ "$i" -le 60 ]; do
+              if ping_node "$node"; then
+                echo "[redis-init] $node 就绪"
+                ready=1
+                break
+              fi
+              i=$((i + 1))
+              sleep 2
+            done
+            if [ "$ready" -ne 1 ]; then
+              echo "[redis-init] $node 等待超时（120s）" >&2
+              exit 1
+            fi
+          done
+
+          first=$(echo "$REDIS_NODES" | awk '{print $1}')
+          if cluster_state "$first"; then
+            echo "[redis-init] 集群已就绪，跳过初始化"
+            exit 0
+          fi
+
+          echo "[redis-init] 创建集群（3 主 3 从）..."
+          # shellcheck disable=SC2086
+          redis-cli --cluster create $REDIS_NODES \
+            --cluster-replicas 1 \
+            --cluster-yes \
+            -a "$REDIS_PASSWORD" \
+            --no-auth-warning
+
+          echo "[redis-init] 集群创建完成"

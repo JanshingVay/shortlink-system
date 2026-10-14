@@ -32,9 +32,24 @@ spec:
           mountPath: /data
         - name: redis-config
           mountPath: /usr/local/etc/redis
+        env:
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: shortlink-secret
+              key: REDIS_PASSWORD
         command:
         - redis-server
         - /usr/local/etc/redis/redis.conf
+        # 密码必须经 command/args 注入：K8s 只会展开容器 command/args/env 中的 $(VAR)，
+        # ConfigMap 的内容不会被展开。原先写在 redis.conf 里的 $(REDIS_PASSWORD)
+        # 会被 Redis 当成字面量密码，导致应用端用真实密码 AUTH 时 WRONGPASS 而启动失败。
+        # 命令行参数位于配置文件之后，会覆盖配置文件中的同名指令。
+        args:
+        - --requirepass
+        - $(REDIS_PASSWORD)
+        - --masterauth
+        - $(REDIS_PASSWORD)
       volumes:
       - name: redis-config
         configMap:
@@ -62,5 +77,4 @@ data:
     cluster-node-timeout 5000
     appendonly yes
     port 7001
-    requirepass $(REDIS_PASSWORD)
-    masterauth $(REDIS_PASSWORD)
+    # requirepass / masterauth 不在这里配置，见 StatefulSet 中通过 args 注入。

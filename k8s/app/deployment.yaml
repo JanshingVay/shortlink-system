@@ -27,6 +27,14 @@ spec:
             cpu: 1000m
             memory: 1Gi
         env:
+        # 必须定义在 MYSQL_*_DSN 之前：K8s 的 $(VAR) 展开只能引用同一容器内
+        # 更早声明的环境变量。原先缺少该变量，DSN 里的 $(MYSQL_PASSWORD) 会保持
+        # 字面量，导致 MySQL 认证失败、进程 Fatal 退出并进入 CrashLoopBackOff。
+        - name: MYSQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: shortlink-secret
+              key: MYSQL_PASSWORD
         - name: MYSQL_MASTER_DSN
           value: "shortlink:$(MYSQL_PASSWORD)@tcp(mysql-master:3306)/shortlink?charset=utf8mb4&parseTime=True&loc=Local"
         - name: MYSQL_SLAVE1_DSN
@@ -48,15 +56,21 @@ spec:
             configMapKeyRef:
               name: shortlink-config
               key: GIN_MODE
+        # 存活探针只探进程本身：不查下游依赖，避免依赖抖动引发 Pod 批量重启。
         livenessProbe:
           httpGet:
             path: /health
             port: 8080
           initialDelaySeconds: 30
           periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        # 就绪探针检查依赖：仅 MySQL 主库不可用才摘除流量，Redis 故障仅上报 degraded。
         readinessProbe:
           httpGet:
-            path: /health
+            path: /ready
             port: 8080
           initialDelaySeconds: 10
           periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3

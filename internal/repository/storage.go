@@ -146,6 +146,24 @@ func (s *Storage) GetWriteDB(ctx context.Context) *gorm.DB {
 	return s.MasterDB.WithContext(ctx)
 }
 
+// PingMaster 检查 MySQL 主库连通性，供就绪探针判定服务能否接收写流量。
+// 注意：这里只探主库，不走从库。从库挂了读路径仍可由主库兜底，
+// 但主库不可用意味着短链无法创建（事实源缺失），属于真正的不就绪。
+func (s *Storage) PingMaster(ctx context.Context) error {
+	sqlDB, err := s.MasterDB.DB()
+	if err != nil {
+		return fmt.Errorf("获取主库连接池失败: %w", err)
+	}
+	return sqlDB.PingContext(ctx)
+}
+
+// PingRedis 检查 Redis 连通性，供就绪探针上报降级状态。
+// Redis 故障已被业务链路降级承接（读回源 MySQL、限流切本地），
+// 因此探针只上报 degraded，不据此摘除流量。
+func (s *Storage) PingRedis(ctx context.Context) error {
+	return s.RedisClient.Ping(ctx).Err()
+}
+
 func (s *Storage) RedisSetWithHashTag(ctx context.Context, shortCode string, longURL string, ttl time.Duration) error {
 	key := s.GetRedisKeyWithHashTag(shortCode)
 	return s.RedisClient.Set(ctx, key, longURL, ttl).Err()
